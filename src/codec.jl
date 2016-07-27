@@ -37,29 +37,44 @@ const WIRETYPES = @compat Dict{Symbol,Tuple}(
 
 aliaswiretypes(wtype::Symbol) = wiretypes(WIRETYPES[wtype][4])
 
-wiretypes(::Type{Int32})                    = [:int32, :sint32, :enum, :sfixed32]
-wiretypes(::Type{Int64})                    = [:int64, :sint64, :sfixed64]
-wiretypes(::Type{UInt32})                   = [:uint32, :fixed32]
-wiretypes(::Type{UInt64})                   = [:uint64, :fixed64]
-wiretypes(::Type{Bool})                     = [:bool]
-wiretypes(::Type{Float64})                  = [:double]
-wiretypes(::Type{Float32})                  = [:float]
-wiretypes{T<:AbstractString}(::Type{T})     = [:string]
-wiretypes(::Type{Array{UInt8,1}})           = [:bytes]
-wiretypes{K,V}(::Type{Dict{K,V}})           = [:map]
-wiretypes(::Type)                           = [:obj]
+const WTYPES_Int32                          = [:int32, :sint32, :enum, :sfixed32]
+const WTYPES_Int64                          = [:int64, :sint64, :sfixed64]
+const WTYPES_UInt32                         = [:uint32, :fixed32]
+const WTYPES_UInt64                         = [:uint64, :fixed64]
+const WTYPES_Bool                           = [:bool]
+const WTYPES_Float64                        = [:double]
+const WTYPES_Float32                        = [:float]
+const WTYPES_String                         = [:string]
+const WTYPES_Bytes                          = [:bytes]
+const WTYPES_Dict                           = [:map]
+const WTYPES_Any                            = [:obj]
+
+const DEFVAL_BOOL                           = [false]
+const DEFVAL_NONE                           = []
+
+wiretypes(::Type{Int32})                    = WTYPES_Int32
+wiretypes(::Type{Int64})                    = WTYPES_Int64
+wiretypes(::Type{UInt32})                   = WTYPES_UInt32
+wiretypes(::Type{UInt64})                   = WTYPES_UInt64
+wiretypes(::Type{Bool})                     = WTYPES_Bool
+wiretypes(::Type{Float64})                  = WTYPES_Float64
+wiretypes(::Type{Float32})                  = WTYPES_Float32
+wiretypes{T<:AbstractString}(::Type{T})     = WTYPES_String
+wiretypes(::Type{Array{UInt8,1}})           = WTYPES_Bytes
+wiretypes{K,V}(::Type{Dict{K,V}})           = WTYPES_Dict
+wiretypes(::Type)                           = WTYPES_Any
 wiretypes{T}(::Type{Array{T,1}})            = wiretypes(T)
 
 wiretype{T}(::Type{T}) = wiretypes(T)[1]
 
 defaultval{T<:Number}(::Type{T})            = [zero(T)]
 defaultval{T<:AbstractString}(::Type{T})    = [convert(T,"")]
-defaultval(::Type{Bool})                    = [false]
+defaultval(::Type{Bool})                    = DEFVAL_BOOL
 defaultval{T}(::Type{Array{T,1}})           = Any[T[]]
-defaultval(::Type)                          = []
+defaultval(::Type)                          = DEFVAL_NONE
 
 
-function _write_uleb{T <: Integer}(io::IO, x::T)
+function _write_uleb{T <: Integer}(io, x::T)
     nw = 0
     cont = true
     while cont
@@ -74,7 +89,7 @@ function _write_uleb{T <: Integer}(io::IO, x::T)
     nw
 end
 
-function _read_uleb{T <: Integer}(io::IO, ::Type{T})
+function _read_uleb{T <: Integer}(io, ::Type{T})
     res = zero(T)
     n = 0
     byte = @compat UInt8(MSB)
@@ -91,13 +106,13 @@ function _read_uleb{T <: Integer}(io::IO, ::Type{T})
     res
 end
 
-function _write_zigzag{T <: Integer}(io::IO, x::T)
+function _write_zigzag{T <: Integer}(io, x::T)
     nbits = 8*sizeof(x)
     zx = (x << 1) $ (x >> (nbits-1))
     _write_uleb(io, zx)
 end
 
-function _read_zigzag{T <: Integer}(io::IO, ::Type{T})
+function _read_zigzag{T <: Integer}(io, ::Type{T})
     zx = _read_uleb(io, UInt64)
     # result is positive if zx is even
     convert(T, iseven(zx) ? (zx >>> 1) : -signed((zx+1) >>> 1))
@@ -106,8 +121,8 @@ end
 
 ##
 # read and write field keys
-_write_key(io::IO, fld::Int, wiretyp::Int) = _write_uleb(io, (fld << 3) | wiretyp)
-function _read_key(io::IO)
+_write_key(io, fld::Int, wiretyp::Int) = _write_uleb(io, (fld << 3) | wiretyp)
+function _read_key(io)
     key = _read_uleb(io, UInt64)
     wiretyp = key & MASK3
     fld = key >>> 3
@@ -117,22 +132,22 @@ end
 
 ##
 # read and write field values
-write_varint{T <: Integer}(io::IO, x::T) = _write_uleb(io, x)
-write_bool(io::IO, x::Bool) = _write_uleb(io, x ? 1 : 0)
-write_svarint{T <: Integer}(io::IO, x::T) = _write_zigzag(io, x)
+write_varint{T <: Integer}(io, x::T) = _write_uleb(io, x)
+write_bool(io, x::Bool) = _write_uleb(io, x ? 1 : 0)
+write_svarint{T <: Integer}(io, x::T) = _write_zigzag(io, x)
 
-read_varint{T <: Integer}(io::IO, ::Type{T}) = _read_uleb(io, T)
-read_bool(io::IO) = @compat Bool(_read_uleb(io, UInt64))
-read_bool(io::IO, ::Type{Bool}) = read_bool(io)
-read_svarint{T <: Integer}(io::IO, ::Type{T}) = _read_zigzag(io, T)
+read_varint{T <: Integer}(io, ::Type{T}) = _read_uleb(io, T)
+read_bool(io) = @compat Bool(_read_uleb(io, UInt64))
+read_bool(io, ::Type{Bool}) = read_bool(io)
+read_svarint{T <: Integer}(io, ::Type{T}) = _read_zigzag(io, T)
 
-write_fixed(io::IO, x::UInt32) = _write_fixed(io, x)
-write_fixed(io::IO, x::UInt64) = _write_fixed(io, x)
-write_fixed(io::IO, x::Int32) = _write_fixed(io, reinterpret(UInt32, x))
-write_fixed(io::IO, x::Int64) = _write_fixed(io, reinterpret(UInt64, x))
-write_fixed(io::IO, x::Float32) = _write_fixed(io, reinterpret(UInt32, x))
-write_fixed(io::IO, x::Float64) = _write_fixed(io, reinterpret(UInt64, x))
-function _write_fixed{T <: Unsigned}(io::IO, ux::T)
+write_fixed(io, x::UInt32) = _write_fixed(io, x)
+write_fixed(io, x::UInt64) = _write_fixed(io, x)
+write_fixed(io, x::Int32) = _write_fixed(io, reinterpret(UInt32, x))
+write_fixed(io, x::Int64) = _write_fixed(io, reinterpret(UInt64, x))
+write_fixed(io, x::Float32) = _write_fixed(io, reinterpret(UInt32, x))
+write_fixed(io, x::Float64) = _write_fixed(io, reinterpret(UInt64, x))
+function _write_fixed{T <: Unsigned}(io, ux::T)
     N = sizeof(ux)
     for n in 1:N
         write(io, @compat UInt8(ux & MASK8))
@@ -141,13 +156,13 @@ function _write_fixed{T <: Unsigned}(io::IO, ux::T)
     N
 end
 
-read_fixed(io::IO, typ::Type{UInt32}) = _read_fixed(io, convert(UInt32,0), 4)
-read_fixed(io::IO, typ::Type{UInt64}) = _read_fixed(io, convert(UInt64,0), 8)
-read_fixed(io::IO, typ::Type{Int32}) = reinterpret(Int32, _read_fixed(io, convert(UInt32,0), 4))
-read_fixed(io::IO, typ::Type{Int64}) = reinterpret(Int64, _read_fixed(io, convert(UInt64,0), 8))
-read_fixed(io::IO, typ::Type{Float32}) = reinterpret(Float32, _read_fixed(io, convert(UInt32,0), 4))
-read_fixed(io::IO, typ::Type{Float64}) = reinterpret(Float64, _read_fixed(io, convert(UInt64,0), 8))
-function _read_fixed{T <: Unsigned}(io::IO, ret::T, N::Int)
+read_fixed(io, typ::Type{UInt32}) = _read_fixed(io, convert(UInt32,0), 4)
+read_fixed(io, typ::Type{UInt64}) = _read_fixed(io, convert(UInt64,0), 8)
+read_fixed(io, typ::Type{Int32}) = reinterpret(Int32, _read_fixed(io, convert(UInt32,0), 4))
+read_fixed(io, typ::Type{Int64}) = reinterpret(Int64, _read_fixed(io, convert(UInt64,0), 8))
+read_fixed(io, typ::Type{Float32}) = reinterpret(Float32, _read_fixed(io, convert(UInt32,0), 4))
+read_fixed(io, typ::Type{Float64}) = reinterpret(Float64, _read_fixed(io, convert(UInt64,0), 8))
+function _read_fixed{T <: Unsigned}(io, ret::T, N::Int)
     for n in 0:(N-1)
         byte = convert(T, read(io, UInt8))
         ret |= (byte << 8*n)
@@ -155,26 +170,26 @@ function _read_fixed{T <: Unsigned}(io::IO, ret::T, N::Int)
     ret
 end
 
-function write_bytes(io::IO, data::Array{UInt8,1})
+function write_bytes(io, data::Array{UInt8,1})
     n = _write_uleb(io, sizeof(data))
     n += write(io, data)
     n
 end
 
-function read_bytes(io::IO)
+function read_bytes(io)
     n = _read_uleb(io, UInt64)
     data = Array(UInt8, n)
     read!(io, data)
     data
 end
-read_bytes(io::IO, ::Type{Array{UInt8,1}}) = read_bytes(io)
+read_bytes(io, ::Type{Array{UInt8,1}}) = read_bytes(io)
 
-write_string(io::IO, x::AbstractString) = write_string(io, String(x))
-write_string(io::IO, x::Compat.String) = write_bytes(io, x.data)
+write_string(io, x::AbstractString) = write_string(io, String(x))
+write_string(io, x::Compat.String) = write_bytes(io, x.data)
 
-read_string(io::IO) = byte2str(read_bytes(io))
-read_string(io::IO, ::Type{AbstractString}) = read_string(io)
-read_string{T <: Compat.String}(io::IO, ::Type{T}) = convert(T, read_string(io))
+read_string(io) = byte2str(read_bytes(io))
+read_string(io, ::Type{AbstractString}) = read_string(io)
+read_string{T <: Compat.String}(io, ::Type{T}) = convert(T, read_string(io))
 
 ##
 # read and write protobuf structures
@@ -215,7 +230,7 @@ function _setmeta(meta::ProtoMeta, jtype::Type, ordered::Array{ProtoMetaAttribs,
     meta
 end
 
-function write_map(io::IO, fldnum::Int, dict::Dict)
+function write_map(io, fldnum::Int, dict::Dict)
     dmeta = mapentry_meta(typeof(dict))
     iob = IOBuffer()
 
@@ -230,7 +245,7 @@ function write_map(io::IO, fldnum::Int, dict::Dict)
     n
 end
 
-function writeproto(io::IO, val, attrib::ProtoMetaAttribs)
+function writeproto(io, val, attrib::ProtoMetaAttribs)
     fld = attrib.fldnum
     meta = attrib.meta
     ptyp = attrib.ptyp
@@ -245,7 +260,7 @@ function writeproto(io::IO, val, attrib::ProtoMetaAttribs)
     n
 end
 
-function writeproto{T<:Number}(io::IO, val::T, attrib::ProtoMetaAttribs)
+function writeproto{T<:Number}(io, val::T, attrib::ProtoMetaAttribs)
     fld = attrib.fldnum
     meta = attrib.meta
     ptyp = attrib.ptyp
@@ -258,7 +273,7 @@ function writeproto{T<:Number}(io::IO, val::T, attrib::ProtoMetaAttribs)
     n
 end
 
-function writeproto{T<:AbstractString}(io::IO, val::T, attrib::ProtoMetaAttribs)
+function writeproto{T<:AbstractString}(io, val::T, attrib::ProtoMetaAttribs)
     fld = attrib.fldnum
     ptyp = attrib.ptyp
     wiretyp, write_fn, read_fn, jtyp = WIRETYPES[ptyp]
@@ -269,9 +284,9 @@ function writeproto{T<:AbstractString}(io::IO, val::T, attrib::ProtoMetaAttribs)
     n
 end
 
-writeproto{K,V}(io::IO, val::Dict{K,V}, attrib::ProtoMetaAttribs) = write_map(io, attrib.fldnum, val)
+writeproto{K,V}(io, val::Dict{K,V}, attrib::ProtoMetaAttribs) = write_map(io, attrib.fldnum, val)
 
-function writeproto{T}(io::IO, val::Array{T}, attrib::ProtoMetaAttribs)
+function writeproto{T}(io, val::Array{T}, attrib::ProtoMetaAttribs)
     ptyp = attrib.ptyp
     wiretyp, write_fn, read_fn, jtyp = WIRETYPES[ptyp]
     wfn = eval(write_fn)
@@ -279,7 +294,7 @@ function writeproto{T}(io::IO, val::Array{T}, attrib::ProtoMetaAttribs)
     writeproto(io, val, attrib, wfn)
 end
 
-function writeproto{T,F}(io::IO, val::Array{T}, attrib::ProtoMetaAttribs, wfn::F)
+function writeproto{T,F}(io, val::Array{T}, attrib::ProtoMetaAttribs, wfn::F)
     fld = attrib.fldnum
     meta = attrib.meta
     ptyp = attrib.ptyp
@@ -318,7 +333,7 @@ function writeproto{T,F}(io::IO, val::Array{T}, attrib::ProtoMetaAttribs, wfn::F
     n
 end
 
-function writeproto(io::IO, obj, meta::ProtoMeta=meta(typeof(obj)))
+function writeproto(io, obj, meta::ProtoMeta=meta(typeof(obj)))
     n = 0
     for attrib in meta.ordered 
         fld = attrib.fld
@@ -348,7 +363,7 @@ end
 
 instantiate(t::Type) = ccall(:jl_new_struct_uninit, Any, (Any,), t)
 
-function skip_field(io::IO, wiretype::Integer)
+function skip_field(io, wiretype)
     if wiretype == WIRETYP_LENDELIM
         read_bytes(io)
     elseif wiretype == WIRETYP_64BIT
@@ -434,7 +449,7 @@ function read_field(io, container, attrib::ProtoMetaAttribs, wiretyp, jtyp_speci
     end
 end
 
-function readproto(io::IO, obj, meta::ProtoMeta=meta(typeof(obj)))
+function readproto(io, obj, meta::ProtoMeta=meta(typeof(obj)))
     @logmsg("readproto begin: $(typeof(obj))")
     fillunset(obj)
     fldnums = collect(keys(meta.numdict))

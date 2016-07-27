@@ -1,15 +1,15 @@
 # utility methods
 
-isinitialized(obj::Any) = isfilled(obj)
+isinitialized(obj) = isfilled(obj)
 
-set_field!(obj::Any, fld::Symbol, val) = (setfield!(obj, fld, val); fillset(obj, fld); nothing)
-@deprecate set_field(obj::Any, fld::Symbol, val) set_field!(obj, fld, val)
+set_field!(obj, fld::Symbol, val) = (setfield!(obj, fld, val); fillset(obj, fld); nothing)
+@deprecate set_field(obj, fld::Symbol, val) set_field!(obj, fld, val)
 
-get_field(obj::Any, fld::Symbol) = isfilled(obj, fld) ? getfield(obj, fld) : error("uninitialized field $fld")
+get_field(obj, fld::Symbol) = isfilled(obj, fld) ? getfield(obj, fld) : error("uninitialized field $fld")
 
 clear = fillunset
 
-has_field(obj::Any, fld::Symbol) = isfilled(obj, fld)
+has_field(obj, fld::Symbol) = isfilled(obj, fld)
 
 function copy!{T}(to::T, from::T)
     fillunset(to)
@@ -24,7 +24,7 @@ function copy!{T}(to::T, from::T)
     nothing
 end
 
-function add_field!(obj::Any, fld::Symbol, val)
+function add_field!(obj, fld::Symbol, val)
     typ = typeof(obj)
     attrib = meta(typ).symdict[fld]
     (attrib.occurrence != 2) && error("$(typ).$(fld) is not a repeating field")
@@ -37,7 +37,7 @@ function add_field!(obj::Any, fld::Symbol, val)
     push!(getfield(obj, fld), val)
     nothing
 end
-@deprecate add_field(obj::Any, fld::Symbol, val) add_field!(obj, fld, val)
+@deprecate add_field(obj, fld::Symbol, val) add_field!(obj, fld, val)
 
 protobuild{T}(::Type{T}, nv::Dict{Symbol}=Dict{Symbol,Any}()) = _protobuild(T(), collect(nv))
 
